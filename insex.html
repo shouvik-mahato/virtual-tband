@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Virtual T-Band Node</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      text-align: center;
+      padding: 24px 16px;
+      margin: 0;
+    }
+    .card {
+      background-color: #1e293b;
+      border: 2px solid #334155;
+      border-radius: 16px;
+      padding: 20px;
+      max-width: 340px;
+      margin: 20px auto;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: bold;
+      background: #0369a1;
+      color: #e0f2fe;
+      margin-bottom: 15px;
+    }
+    .telemetry-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #334155;
+      font-size: 14px;
+    }
+    .val {
+      font-family: monospace;
+      color: #38bdf8;
+      font-weight: bold;
+    }
+    button {
+      background-color: #0284c7;
+      color: #ffffff;
+      border: none;
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: bold;
+      width: 100%;
+      margin-top: 15px;
+      cursor: pointer;
+    }
+    button:active {
+      background-color: #0369a1;
+    }
+    .panic-btn {
+      background-color: #dc2626;
+      margin-top: 10px;
+    }
+    .panic-btn:active {
+      background-color: #b91c1c;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>📟 Virtual T-Band Node</h2>
+  <div class="card">
+    <div id="status" class="status-badge">Status: Standby</div>
+
+    <div class="telemetry-row">
+      <span>Latitude:</span>
+      <span id="lat" class="val">--</span>
+    </div>
+    <div class="telemetry-row">
+      <span>Longitude:</span>
+      <span id="lng" class="val">--</span>
+    </div>
+    <div class="telemetry-row">
+      <span>Battery:</span>
+      <span id="battery" class="val">--%</span>
+    </div>
+    <div class="telemetry-row" style="border: none;">
+      <span>Mode:</span>
+      <span id="mode" class="val">GPS</span>
+    </div>
+
+    <button id="trackBtn" onclick="toggleTracking()">📍 Start Live GPS Tracking</button>
+    <button class="panic-btn" onclick="triggerPanic()">🚨 Emergency Panic Alert</button>
+  </div>
+
+  <script>
+    const FIREBASE_URL = "https://t-band-7945d-default-rtdb.firebaseio.com/tband_001.json";
+    let watchId = null;
+    let isTracking = false;
+
+    async function getBatteryLevel() {
+      if (navigator.getBattery) {
+        try {
+          const b = await navigator.getBattery();
+          return Math.round(b.level * 100);
+        } catch (_) {
+          return 95;
+        }
+      }
+      return 95;
+    }
+
+    async function pushToFirebase(lat, lng, isPanic = false) {
+      const battery = await getBatteryLevel();
+      document.getElementById('lat').innerText = lat.toFixed(6);
+      document.getElementById('lng').innerText = lng.toFixed(6);
+      document.getElementById('battery').innerText = battery + "%";
+
+      const payload = {
+        latitude: parseFloat(lat.toFixed(6)),
+        longitude: parseFloat(lng.toFixed(6)),
+        battery_percentage: battery,
+        is_panic: isPanic,
+        mode: "GPS"
+      };
+
+      try {
+        await fetch(FIREBASE_URL, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        console.error("Firebase update failed:", err);
+      }
+    }
+
+    function toggleTracking() {
+      const status = document.getElementById('status');
+      const btn = document.getElementById('trackBtn');
+
+      if (!isTracking) {
+        if (!navigator.geolocation) {
+          alert("Geolocation is not supported by your browser.");
+          return;
+        }
+
+        status.innerText = "Status: Streaming to Cloud...";
+        status.style.background = "#16a34a";
+        btn.innerText = "⏹ Stop Tracking";
+        btn.style.background = "#475569";
+        isTracking = true;
+
+        watchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            pushToFirebase(pos.coords.latitude, pos.coords.longitude, false);
+          },
+          (err) => {
+            status.innerText = "GPS Error: " + err.message;
+            status.style.background = "#dc2626";
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 1000,
+            timeout: 5000
+          }
+        );
+      } else {
+        if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+        isTracking = false;
+        status.innerText = "Status: Standby";
+        status.style.background = "#0369a1";
+        btn.innerText = "📍 Start Live GPS Tracking";
+        btn.style.background = "#0284c7";
+      }
+    }
+
+    function triggerPanic() {
+      const lat = parseFloat(document.getElementById('lat').innerText) || 22.572645;
+      const lng = parseFloat(document.getElementById('lng').innerText) || 88.363892;
+      pushToFirebase(lat, lng, true);
+      alert("🚨 Panic signal sent to Guardian App!");
+    }
+  </script>
+</body>
+</html>
